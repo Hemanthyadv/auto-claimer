@@ -6,7 +6,7 @@ const DEFAULT_SETTINGS = {
   notifyEnabled: true,
   autoCloseTabs: false,
   closeTabDelay: 1000,
-  autoSwitchTab: true,
+  autoSwitchTab: false,
   availableTabKeywords: 'Available tasks, Open tasks',
   taskCardKeywords: '.task-card, .task-item, .task-row, [data-testid*="task"], [class*="task-card"], [class*="task-item"], [class*="project-card"]',
   autoReload: false,
@@ -50,7 +50,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   bindToggle('soundToggle', 'soundEnabled');
   bindToggle('notifyToggle', 'notifyEnabled');
-  bindToggle('autoSwitchTabToggle', 'autoSwitchTab');
   bindToggle('autoReloadToggle', 'autoReload', () => {
     el.reloadSecGroup.classList.toggle('hidden', !el.autoReloadToggle.checked);
   });
@@ -156,7 +155,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.notifyToggle.checked = s.notifyEnabled !== false;
     el.autoCloseTabsToggle.checked = Boolean(s.autoCloseTabs);
     el.closeTabDelayGroup.classList.toggle('hidden', !s.autoCloseTabs);
-    el.autoSwitchTabToggle.checked = Boolean(s.autoSwitchTab);
+    el.autoSwitchTabToggle.checked = false;
+    el.autoSwitchTabToggle.disabled = true;
     el.autoReloadToggle.checked = Boolean(s.autoReload);
     el.reloadSecGroup.classList.toggle('hidden', !s.autoReload);
     el.buttonKeywords.value = s.buttonKeywords || DEFAULT_SETTINGS.buttonKeywords;
