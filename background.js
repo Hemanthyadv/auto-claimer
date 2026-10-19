@@ -43,7 +43,14 @@ async function handleTaskClaimed(data) {
   // This message is sent only after the content script detects a page success indicator.
   const { claimedCount = 0 } = await chrome.storage.local.get({ claimedCount: 0 });
   await chrome.storage.local.set({ claimedCount: claimedCount + 1 });
-  if (data.soundEnabled !== false) await playAudioAlert();
+  if (data.soundEnabled !== false) {
+    try {
+      await playAudioAlert();
+    } catch (error) {
+      // Keep the desktop notification available even if audio playback fails.
+      console.warn('[Auto-Claimer] Audio alert unavailable:', error);
+    }
+  }
   if (data.notifyEnabled !== false) {
     await chrome.notifications.create({
       type: 'basic',
