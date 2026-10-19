@@ -6,7 +6,7 @@ const DEFAULT_SETTINGS = {
   notifyEnabled: true,
   autoCloseTabs: false,
   closeTabDelay: 1000,
-  autoSwitchTab: false,
+  autoSwitchTab: true,
   availableTabKeywords: 'Available tasks, Open tasks',
   taskCardKeywords: '.task-card, .task-item, .task-row, [data-testid*="task"], [class*="task-card"], [class*="task-item"], [class*="project-card"]',
   autoReload: false,
