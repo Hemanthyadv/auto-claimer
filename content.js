@@ -254,14 +254,19 @@
   }
 
   function isClearlyClaimAction(element) {
-    const label = labelOf(element).toLowerCase();
+    const label = labelOf(element).toLowerCase().replace(/\s+/g, ' ').trim();
     if (!label || label.length > 100) return false;
+    // Avoid status labels and unrelated workflow actions.
+    if (/\b(claimed|claiming|unavailable|already taken|in progress|assigned|completed|expired)\b/.test(label)) return false;
     if (/^(view|open|details|learn more|start|start now|continue|next|submit|cancel|close|back|refresh|search|filter|available tasks|my tasks)$/i.test(label)) return false;
-    const keywords = words(config.buttonKeywords || DEFAULTS.buttonKeywords).map(v => v.toLowerCase());
-    return keywords.some(keyword => {
-      if (/^(start|open|view|task)$/i.test(keyword)) return false;
-      return label === keyword || label.includes(keyword);
-    });
+    const keywords = words(config.buttonKeywords || DEFAULTS.buttonKeywords)
+      .map(v => v.toLowerCase().replace(/\s+/g, ' ').trim())
+      .filter(keyword => keyword && !/^(start|open|view|task|claimed|claiming)$/i.test(keyword));
+    return keywords.some(keyword =>
+      label === keyword || label.startsWith(keyword + ' ') ||
+      label.startsWith(keyword + ':') || label.startsWith(keyword + '—') ||
+      label.startsWith(keyword + '-')
+    );
   }
 
   function isVisible(element) {
@@ -274,35 +279,40 @@
   }
 
   async function waitForClaimOutcome(button, label) {
-    const start = Date.now(), initialUrl = location.href, initialText = (document.body?.innerText || '').toLowerCase();
-    while (Date.now() - start < 6000) {
+    const start = Date.now();
+    const initialText = (document.body?.innerText || '').toLowerCase().slice(0, 50000);
+    const successPhrases = [
+      'task claimed', 'successfully claimed', 'claim successful',
+      'task accepted', 'you have claimed', 'added to your tasks'
+    ];
+    const failurePhrases = [
+      'unable to claim', 'failed to claim', 'claim failed',
+      'no longer available', 'already taken', 'something went wrong'
+    ];
+    while (Date.now() - start < 8000) {
       await new Promise(resolve => setTimeout(resolve, 250));
-      const bodyText = (document.body?.innerText || '').toLowerCase();
-      const newText = bodyText.slice(0, 20000);
-      const success = /task claimed|successfully claimed|claim successful|task accepted|you have claimed|already claimed|added to your tasks/.test(newText) &&
-        !/unable to claim|failed to claim|claim failed|no longer available|already taken|something went wrong/.test(newText);
-      const failure = /unable to claim|failed to claim|claim failed|no longer available|already taken|something went wrong/.test(newText);
-      if (failure) {
-        logActivity('The page appears to report a claim failure. Verify task status manually.', 'warn');
+      const bodyText = (document.body?.innerText || '').toLowerCase().slice(0, 50000);
+      const newSuccess = successPhrases.some(phrase =>
+        bodyText.includes(phrase) && !initialText.includes(phrase)
+      );
+      const newFailure = failurePhrases.some(phrase =>
+        bodyText.includes(phrase) && !initialText.includes(phrase)
+      );
+      if (newFailure) {
+        logActivity('The page reported a possible claim failure or unavailable task. Verify task status manually.', 'warn');
         return;
       }
-      if (success || (location.href !== initialUrl && /task|project|work/i.test(location.href))) {
+      // An old success banner or a route change is not proof of a new claim.
+      if (newSuccess) {
         await reportConfirmedClaim(label);
         return;
       }
-      if (!button.isConnected || !isVisible(button) || !isClearlyClaimAction(button)) {
-        // The UI can replace the button on a successful claim, but that alone is not proof.
-        if (Date.now() - start > 1500) {
-          logActivity('Claim button changed/disappeared but no explicit success message was found. Check the page.', 'warn');
-          return;
-        }
-      }
-      if (bodyText !== initialText && /claimed|accepted|assigned|added to your tasks/.test(bodyText)) {
-        await reportConfirmedClaim(label);
+      if ((!button.isConnected || !isVisible(button) || !isClearlyClaimAction(button)) && Date.now() - start > 1500) {
+        logActivity('Claim button changed/disappeared but no new success message was found. Check the page manually.', 'warn');
         return;
       }
     }
-    logActivity('No reliable success confirmation detected for "' + label + '". Check the page manually.', 'warn');
+    logActivity('No new reliable success confirmation detected for "' + label + '". Check the page manually.', 'warn');
   }
 
   async function reportConfirmedClaim(label) {
