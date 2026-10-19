@@ -22,6 +22,7 @@
   let pollTimer = null;
   let reloadTimer = null;
   let scanning = false;
+  let claimInProgress = false;
   const clicked = new WeakSet();
   const pending = new WeakSet();
   let lastScanLog = 0;
@@ -105,6 +106,7 @@
 
       // Never auto-click ambiguous labels such as "Start", "Open", or "View".
       pending.add(button);
+      claimInProgress = true;
       const label = getLabel(button);
       logActivity('Candidate found: "' + label + '". Attempting one normal click.', 'system');
 
@@ -125,6 +127,7 @@
         logActivity('Click failed: ' + String(error?.message || error), 'error');
       } finally {
         pending.delete(button);
+        claimInProgress = false;
       }
       break; // One action per scan; avoid rapid multiple claims.
     }
