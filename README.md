@@ -1,81 +1,52 @@
-# ⚡ Handshake AI Task Auto-Claimer Chrome Extension
+# Handshake AI Task Auto-Claimer
 
-High-performance browser extension (Manifest V3) built to automatically detect and claim available tasks on Handshake AI as soon as they appear.
+A Manifest V3 Chrome extension that scans the current Handshake task page, can switch to the Available Tasks tab, and clicks a clearly labelled claim action when its text matches the configured keywords.
 
----
+## Features
 
-## 🚀 Key Features
+- DOM mutation monitoring with a configurable polling fallback (100–2000 ms).
+- Available Tasks tab switching using configurable visible tab labels.
+- Claim action matching that avoids common status labels such as “Claimed” and “Unavailable”.
+- Optional sound and desktop notification alerts.
+- Scan and confirmed-claim counters in the popup.
+- Optional idle-page auto-refresh; refresh is postponed while a claim action is visible or an action is in progress.
+- Configurable button keywords and CSS selectors.
 
-- **Sub-Millisecond Detection**: Uses high-speed `MutationObserver` + fallback adaptive polling interval (100ms - 300ms) to detect dynamic task drops instantly.
-- **Sleek Control Popup**: Modern glassmorphism UI with master ON/OFF toggle, real-time counters, speed controls, and activity logs.
-- **Customizable Button Keywords & Selectors**: Supports matching common keywords (`Claim`, `Claim Task`, `Start`, `Accept`, `Reserve`) and custom CSS selectors.
-- **Audio & Desktop Notifications**: Plays Web Audio triumph sound alerts and native browser popups when tasks are claimed.
-- **Human-like Timing Control**: Optional click delay (0ms - 1500ms) to avoid triggering aggressive bot detection algorithms.
-- **Auto-Reload Guard**: Option to automatically reload the page if no tasks appear for X seconds.
+## Install in Chrome
 
----
+1. Download the ZIP from the repository branch or pull request and extract it.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Select **Load unpacked** and choose the extracted extension folder (the folder containing `manifest.json`).
+5. Open your Handshake task dashboard in a supported domain, then refresh that page so Chrome loads the content script.
+6. Open the extension popup. Turn on **Auto-Claimer Engine** and ensure **Auto-Switch to “Available Tasks”** is enabled.
+7. Use **Test Sound** to check the alert path, then watch Activity Log for detection messages.
 
-## 🛠️ Step-by-Step Installation Guide
+## Important limitations and safe use
 
-### 1. Load Unpacked Extension in Chrome / Edge / Brave
-1. Open your Chromium browser (Chrome, Edge, Brave, Opera, etc.).
-2. In the address bar, navigate to:
-   - **Chrome**: `chrome://extensions`
-   - **Edge**: `edge://extensions`
-   - **Brave**: `brave://extensions`
-3. Enable **Developer mode** using the toggle switch in the upper-right corner.
-4. Click the **Load unpacked** button in the top left.
-5. Select the project directory:
-   `C:\Users\handshake-auto-claimer`
-6. Pin the extension icon ⚡ to your browser toolbar for easy access.
+- **Live verification is required.** Handshake page markup and button labels can change. The default selectors are heuristics and have not been validated against every live Handshake layout.
+- The extension only increments the claimed counter when it detects a new success phrase in the page text. If Handshake uses different wording, a real claim may not be counted; check the task page and Activity Log.
+- A click is not proof that a task was claimed. If the UI changes without a new success phrase, the extension logs a warning instead of counting a success.
+- Auto-refresh is **off by default**. If enabled, it refreshes only when no claim action is detected and no action is in progress.
+- Auto-close tabs is disabled for safety so a task page is not closed before you verify its status.
+- The extension is not a guarantee of winning a task race. Keep the dashboard visible and verify claim status yourself. Follow Handshake’s terms and project instructions.
 
----
+## Settings
 
-## 🧪 Testing the Extension (Instant Test Bench)
+- **Check Speed:** polling interval in milliseconds; mutation monitoring may detect changes sooner.
+- **Click Delay:** optional wait before clicking a detected claim action.
+- **Button Keywords:** comma-separated labels such as `Claim, Claim Task, Accept, Reserve`. Use only labels that genuinely initiate the claim action.
+- **Custom CSS Selectors:** optional comma-separated selectors for claim controls.
+- **Available Tasks Tab Keywords:** visible text used to find the target tab.
+- **Task Card/Row Selectors:** selectors for a task card that must be opened before its claim control appears. Use only selectors verified for the actual Handshake page.
+- **Auto-Reload:** optional idle-page refresh timer; use cautiously.
 
-To test the extension without waiting for real Handshake AI task drops:
+## Project files
 
-1. Open Chrome and navigate to the local test bench file:
-   `file:///C:/Users/handshake-auto-claimer/test_bench.html`
-2. Click the extension icon ⚡ in your browser toolbar.
-3. Turn **ON** the **Auto-Claimer Engine** master switch.
-4. On the test bench page, click **➕ Drop 1 Fast Task** or **⚡ Start Random Task Drop Stream**.
-5. Watch the extension immediately detect and claim the task, play an audio chime, and increment your stats!
-
----
-
-## ⚙️ How to Use on Handshake AI
-
-1. Open your Handshake AI task dashboard (`handshake.com`, `handshake.ai`, etc.).
-2. Click the extension popup icon ⚡.
-3. Toggle the engine to **ON**.
-4. (Optional) Adjust **Check Speed** to `200 ms` for maximum speed during high-traffic drops.
-5. Keep your Handshake AI tab open while working. When a task drops, the extension will claim it instantly and alert you with sound!
-
----
-
-## 🔧 Customizing Button Selectors
-
-If Handshake AI updates their UI or uses unique button labels:
-1. Open the extension popup.
-2. Click the **Selectors** tab.
-3. Add your specific button keywords (e.g. `Claim Task, Grab Task, Start Now`) or CSS selectors (e.g. `.claim-btn, button[data-testid="claim"]`).
-4. Changes save automatically and take effect instantly.
-
----
-
-## 📂 Project Directory Structure
-
-```
-handshake-auto-claimer/
-├── manifest.json         # Extension Manifest V3 configuration
-├── popup.html            # Control dashboard UI
-├── popup.css             # Dark-theme glassmorphism styling
-├── popup.js              # Popup state & control script
-├── content.js            # Core DOM scanner & auto-click engine
-├── background.js         # Service worker for badges & notifications
-├── offscreen.html        # Web Audio background player host
-├── offscreen.js          # Web Audio synthesizer chime generator
-├── test_bench.html       # Interactive local testing page
-└── README.md             # Setup & usage guide
-```
+- `manifest.json` — extension permissions and content-script matches.
+- `popup.html`, `popup.css`, `popup.js` — settings popup and counters.
+- `content.js` — page scanning, tab switching, task interaction and confirmation checks.
+- `background.js` — notification handling, sound handoff and badge.
+- `offscreen.html`, `offscreen.js` — offscreen Web Audio player.
+- `icon.svg` — extension notification icon.
+- `test_bench.html` — local test page for basic behavior checks.
