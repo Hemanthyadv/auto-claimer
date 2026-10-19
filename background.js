@@ -47,7 +47,7 @@ async function handleTaskClaimed(data) {
   if (data.notifyEnabled !== false) {
     await chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icon.png',
+      iconUrl: chrome.runtime.getURL('icon.svg'),
       title: 'Possible task claim confirmation',
       message: 'The page showed a success indicator for: ' + String(data.buttonText || 'Handshake task').slice(0, 100),
       priority: 1
@@ -65,7 +65,8 @@ async function playAudioAlert() {
       justification: 'Play an optional notification sound after a task status change.'
     });
   }
-  chrome.runtime.sendMessage({ type: 'PLAY_AUDIO_CHIME' }).catch(() => {});
+  const response = await chrome.runtime.sendMessage({ type: 'PLAY_AUDIO_CHIME' });
+  if (!response?.ok) throw new Error('Offscreen audio player did not confirm playback.');
 }
 
 function updateBadge(enabled) {
