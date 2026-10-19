@@ -125,7 +125,12 @@
     if (!target) return;
     const active = target.getAttribute('aria-selected') === 'true' ||
       target.getAttribute('aria-current') === 'page' ||
-      target.classList.contains('active') || target.classList.contains('selected');
+      target.getAttribute('aria-pressed') === 'true' ||
+      target.getAttribute('data-state') === 'active' ||
+      target.getAttribute('data-active') === 'true' ||
+      target.classList.contains('active') ||
+      target.classList.contains('selected') ||
+      target.classList.contains('is-active');
     if (active) return;
     lastSwitchAttempt = Date.now();
     actionInProgress = true;
