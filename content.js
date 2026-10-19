@@ -86,7 +86,31 @@
   function resetReloadTimer() {
     if (reloadTimer) clearTimeout(reloadTimer);
     reloadTimer = null;
-    // Automatic reload is deliberately disabled: refreshing can interrupt a task.
+    if (!config.enabled || !config.autoReload || !scanning) return;
+    scheduleIdleReload(config.reloadInterval * 1000);
+  }
+
+  function scheduleIdleReload(delayMs) {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      reloadTimer = null;
+      if (!config.enabled || !config.autoReload || !scanning) return;
+
+      const claimAvailable = findClaimButtons().some(button =>
+        isVisible(button) && isClearlyClaimAction(button)
+      );
+      const busyElement = document.querySelector('button[aria-busy="true"], [role="button"][aria-busy="true"]');
+
+      // Avoid refreshing a hidden tab, an available task page, or an in-progress claim.
+      if (document.hidden || claimInProgress || claimAvailable || busyElement) {
+        logActivity('Auto-refresh postponed because a task or claim may need attention; retrying in 10 seconds.', 'system');
+        scheduleIdleReload(10_000);
+        return;
+      }
+
+      logActivity('Auto-refresh timer reached; refreshing the idle page.', 'system');
+      location.reload();
+    }, delayMs);
   }
 
   async function scanAndClaim() {
