@@ -223,32 +223,70 @@
 
   function tryOpenTaskCard() {
     if (actionInProgress || claimInProgress) return;
-    const raw = words(config.taskCardKeywords || DEFAULTS.taskCardKeywords);
-    const selectors = raw.filter(v => /^(\.|#|\[|[a-z]+$)/i.test(v) && !/^(view|open|task|details)$/i.test(v));
+
+    // Always include the built-in selectors even when an older installation has
+    // saved legacy values such as "View, Open, Task" in storage.
+    const configured = words(config.taskCardKeywords);
+    const defaults = words(DEFAULTS.taskCardKeywords);
+    const selectors = [...new Set([...defaults, ...configured])]
+      .filter(value => /^(\.|#|\[)/.test(value));
+
     for (const selector of selectors) {
       let cards;
       try { cards = document.querySelectorAll(selector); } catch { continue; }
       for (const card of cards) {
         if (!isVisible(card) || clicked.has(card) || pending.has(card)) continue;
-        const text = labelOf(card).toLowerCase();
-        if (!text || text.length > 700) continue;
-        if (card.querySelector('button, a[role="button"], [role="button"]') &&
-            [...card.querySelectorAll('button, a[role="button"], [role="button"]')].some(isClearlyClaimAction)) continue;
-        // Don't click generic page containers or controls as a task card.
         if (card.matches('body, html, main, nav, header, footer, button, a, [role="button"], [role="tab"]')) continue;
+
+        const text = String(card.innerText || card.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!text || text.length > 700) continue;
+        // Do not open a card if it already contains a clear claim action;
+        // the main scanner should click that control instead.
+        const controls = [...card.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')];
+        if (controls.some(control => isVisible(control) && isClearlyClaimAction(control))) continue;
+
         pending.add(card);
         actionInProgress = true;
         try {
+          card.scrollIntoView({ block: 'center', behavior: 'auto' });
           card.click();
           clicked.add(card);
-          logActivity('Opened a visible task card to reveal its claim action.', 'system');
+          logActivity('Clicked a task card/row to reveal its details.', 'system');
         } catch (error) {
-          logActivity('Could not open task card: ' + String(error?.message || error), 'warn');
+          logActivity('Could not click task card: ' + String(error?.message || error), 'warn');
         } finally {
           pending.delete(card);
-          setTimeout(() => { actionInProgress = false; }, 400);
+          setTimeout(() => {
+            actionInProgress = false;
+            // Scan again after the card's detail panel has had time to render.
+            if (config.enabled && scanning) scanAndClaim();
+          }, 450);
         }
         return;
+      }
+    }
+
+    // Legacy configurations sometimes used the words "View" or "Open" rather
+    // than CSS selectors. Only click a visible, exact-label detail control
+    // inside a task-like card, never a page-wide generic action.
+    const detailControls = [...document.querySelectorAll('button, a, [role="button"]')].filter(control => {
+      if (!isVisible(control) || clicked.has(control)) return false;
+      const label = labelOf(control).toLowerCase();
+      if (!/^(view|view task|view details|view task details|open|open task|open details|details)$/.test(label)) return false;
+      return Boolean(control.closest('.task-card, .task-item, .task-row, [data-testid*="task"], [class*="task-card"], [class*="task-item"], [class*="project-card"]'));
+    });
+    const detailControl = detailControls[0];
+    if (detailControl) {
+      clicked.add(detailControl);
+      actionInProgress = true;
+      try {
+        detailControl.click();
+        logActivity('Clicked the task details control inside a task card.', 'system');
+      } finally {
+        setTimeout(() => {
+          actionInProgress = false;
+          if (config.enabled && scanning) scanAndClaim();
+        }, 450);
       }
     }
   }
