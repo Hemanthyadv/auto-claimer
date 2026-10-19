@@ -14,7 +14,7 @@
   let config = { ...DEFAULTS };
   let observer = null, pollTimer = null, reloadTimer = null, statsTimer = null;
   let scanning = false, claimInProgress = false, actionInProgress = false;
-  let lastScanLog = 0, lastStatsWrite = 0, lastSwitchAttempt = 0;
+  let lastScanLog = 0, lastSwitchAttempt = 0, pendingScans = 0;
   const clicked = new WeakSet(), pending = new WeakSet();
 
   init();
@@ -82,16 +82,29 @@
     if (pollTimer) clearInterval(pollTimer);
     if (reloadTimer) clearTimeout(reloadTimer);
     if (statsTimer) clearTimeout(statsTimer);
+    flushScanCount();
     pollTimer = reloadTimer = statsTimer = null;
   }
 
   function recordScan() {
-    const now = Date.now();
-    if (now - lastStatsWrite < 5000) return;
-    lastStatsWrite = now;
-    chrome.storage.local.get({ scansCount: 0 }).then(({ scansCount }) =>
-      chrome.storage.local.set({ scansCount: scansCount + 1 })
-    ).catch(error => console.warn('[Auto-Claimer] Scan counter update failed:', error));
+    pendingScans += 1;
+    if (statsTimer) return;
+    statsTimer = setTimeout(flushScanCount, 5000);
+  }
+
+  async function flushScanCount() {
+    if (statsTimer) clearTimeout(statsTimer);
+    statsTimer = null;
+    const count = pendingScans;
+    pendingScans = 0;
+    if (!count) return;
+    try {
+      const { scansCount = 0 } = await chrome.storage.local.get({ scansCount: 0 });
+      await chrome.storage.local.set({ scansCount: scansCount + count });
+    } catch (error) {
+      pendingScans += count;
+      console.warn('[Auto-Claimer] Scan counter update failed:', error);
+    }
   }
 
   function words(value) {
