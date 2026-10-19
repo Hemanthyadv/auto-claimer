@@ -14,7 +14,7 @@
   let config = { ...DEFAULTS };
   let observer = null, pollTimer = null, reloadTimer = null, statsTimer = null;
   let scanning = false, claimInProgress = false, actionInProgress = false;
-  let lastScanLog = 0, lastSwitchAttempt = 0, pendingScans = 0;
+  let lastScanLog = 0, pendingScans = 0;
   const clicked = new WeakSet(), pending = new WeakSet();
 
   init();
@@ -39,7 +39,7 @@
     try {
       config = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
       config.enabled = Boolean(config.enabled);
-      config.autoSwitchTab = config.autoSwitchTab !== false;
+      config.autoSwitchTab = false; // Automatic tab switching is intentionally disabled.
       config.pollInterval = clamp(config.pollInterval, 100, 2000, 500);
       config.clickDelay = clamp(config.clickDelay, 0, 3000, 250);
       config.reloadInterval = clamp(config.reloadInterval, 10, 180, 60);
@@ -59,17 +59,14 @@
     if (scanning) return;
     scanning = true;
     observer = new MutationObserver(() => {
-      tryAutoSwitchTab();
       scanAndClaim();
     });
     if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'aria-current', 'class', 'hidden'] });
     pollTimer = setInterval(() => {
       recordScan();
-      tryAutoSwitchTab();
       scanAndClaim();
     }, config.pollInterval);
     resetReloadTimer();
-    tryAutoSwitchTab();
     recordScan();
     scanAndClaim();
     logActivity('Detection enabled on this page.', 'system');
@@ -111,39 +108,6 @@
     return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
   }
 
-  function tryAutoSwitchTab() {
-    if (!config.enabled || !config.autoSwitchTab || document.hidden || actionInProgress) return;
-    if (Date.now() - lastSwitchAttempt < 3000) return;
-    const keywords = words(config.availableTabKeywords || DEFAULTS.availableTabKeywords).map(v => v.toLowerCase());
-    if (!keywords.length) return;
-    const candidates = [...document.querySelectorAll('button, a, [role="tab"], [role="button"], [role="link"]')];
-    const target = candidates.find(el => {
-      if (!isVisible(el)) return false;
-      const label = labelOf(el).toLowerCase();
-      return keywords.some(k => label === k || label.includes(k));
-    });
-    if (!target) return;
-    const active = target.getAttribute('aria-selected') === 'true' ||
-      target.getAttribute('aria-current') === 'page' ||
-      target.getAttribute('aria-pressed') === 'true' ||
-      target.getAttribute('data-state') === 'active' ||
-      target.getAttribute('data-active') === 'true' ||
-      target.classList.contains('active') ||
-      target.classList.contains('selected') ||
-      target.classList.contains('is-active');
-    if (active) return;
-    lastSwitchAttempt = Date.now();
-    actionInProgress = true;
-    try {
-      target.click();
-      logActivity('Selected the Available Tasks tab.', 'system');
-    } catch (error) {
-      logActivity('Could not select Available Tasks tab: ' + String(error?.message || error), 'warn');
-    } finally {
-      setTimeout(() => { actionInProgress = false; }, 500);
-    }
-  }
-
   function resetReloadTimer() {
     if (reloadTimer) clearTimeout(reloadTimer);
     reloadTimer = null;
@@ -170,9 +134,6 @@
       await clickClaim(candidate);
       return;
     }
-    // Some Handshake task feeds require opening a task card before its Claim button exists.
-    // Only click a visible configured card when no clear claim button is currently available.
-    tryOpenTaskCard();
     if (Date.now() - lastScanLog > 30000) {
       lastScanLog = Date.now();
       logActivity(buttons.length ? 'Scanning: no new claim action found.' : 'Scanning page; no clear claim button found.', 'system');
@@ -219,76 +180,6 @@
       }
     }
     return [...candidates];
-  }
-
-  function tryOpenTaskCard() {
-    if (actionInProgress || claimInProgress) return;
-
-    // Always include the built-in selectors even when an older installation has
-    // saved legacy values such as "View, Open, Task" in storage.
-    const configured = words(config.taskCardKeywords);
-    const defaults = words(DEFAULTS.taskCardKeywords);
-    const selectors = [...new Set([...defaults, ...configured])]
-      .filter(value => /^(\.|#|\[)/.test(value));
-
-    for (const selector of selectors) {
-      let cards;
-      try { cards = document.querySelectorAll(selector); } catch { continue; }
-      for (const card of cards) {
-        if (!isVisible(card) || clicked.has(card) || pending.has(card)) continue;
-        if (card.matches('body, html, main, nav, header, footer, button, a, [role="button"], [role="tab"]')) continue;
-
-        const text = String(card.innerText || card.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!text || text.length > 700) continue;
-        // Do not open a card if it already contains a clear claim action;
-        // the main scanner should click that control instead.
-        const controls = [...card.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')];
-        if (controls.some(control => isVisible(control) && isClearlyClaimAction(control))) continue;
-
-        pending.add(card);
-        actionInProgress = true;
-        try {
-          card.scrollIntoView({ block: 'center', behavior: 'auto' });
-          card.click();
-          clicked.add(card);
-          logActivity('Clicked a task card/row to reveal its details.', 'system');
-        } catch (error) {
-          logActivity('Could not click task card: ' + String(error?.message || error), 'warn');
-        } finally {
-          pending.delete(card);
-          setTimeout(() => {
-            actionInProgress = false;
-            // Scan again after the card's detail panel has had time to render.
-            if (config.enabled && scanning) scanAndClaim();
-          }, 450);
-        }
-        return;
-      }
-    }
-
-    // Legacy configurations sometimes used the words "View" or "Open" rather
-    // than CSS selectors. Only click a visible, exact-label detail control
-    // inside a task-like card, never a page-wide generic action.
-    const detailControls = [...document.querySelectorAll('button, a, [role="button"]')].filter(control => {
-      if (!isVisible(control) || clicked.has(control)) return false;
-      const label = labelOf(control).toLowerCase();
-      if (!/^(view|view task|view details|view task details|open|open task|open details|details)$/.test(label)) return false;
-      return Boolean(control.closest('.task-card, .task-item, .task-row, [data-testid*="task"], [class*="task-card"], [class*="task-item"], [class*="project-card"]'));
-    });
-    const detailControl = detailControls[0];
-    if (detailControl) {
-      clicked.add(detailControl);
-      actionInProgress = true;
-      try {
-        detailControl.click();
-        logActivity('Clicked the task details control inside a task card.', 'system');
-      } finally {
-        setTimeout(() => {
-          actionInProgress = false;
-          if (config.enabled && scanning) scanAndClaim();
-        }, 450);
-      }
-    }
   }
 
   function labelOf(element) {
