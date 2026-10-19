@@ -1,493 +1,237 @@
-(function () {
+(() => {
   'use strict';
 
-  let config = {
+  const DEFAULTS = {
     enabled: false,
-    pollInterval: 300,
-    clickDelay: 0,
+    pollInterval: 500,
+    clickDelay: 250,
     soundEnabled: true,
     notifyEnabled: true,
-    autoCloseTabs: true,
-    closeTabDelay: 200,
-    autoSwitchTab: true,
-    availableTabKeywords: [],
-    taskCardKeywords: [],
-    taskCardSelectors: [],
+    autoCloseTabs: false,
+    autoSwitchTab: false,
     autoReload: false,
-    reloadInterval: 30,
-    buttonKeywords: [],
-    customSelectors: []
+    reloadInterval: 60,
+    buttonKeywords: 'Claim, Claim Task, Accept, Reserve, Start Task',
+    customSelectors: '',
+    availableTabKeywords: 'Available tasks, Open tasks',
+    taskCardKeywords: '.task-card, .task-item, .task-row, [data-testid*="task"], [class*="task-card"], [class*="task-item"], [class*="project-card"]'
   };
 
-  let isScanning = false;
-  let pollTimer = null;
-  let autoReloadTimer = null;
+  let config = { ...DEFAULTS };
   let observer = null;
-  let lastActivityTime = Date.now();
+  let pollTimer = null;
+  let reloadTimer = null;
+  let scanning = false;
+  const clicked = new WeakSet();
+  const pending = new WeakSet();
+  let lastScanLog = 0;
 
-  // Load settings and initialize
   init();
 
   async function init() {
-    await updateConfigFromStorage();
-
-    // Listen for state changes from popup
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg.type === 'STATE_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
-        updateConfigFromStorage();
+    await loadConfig();
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === 'STATE_CHANGED' || message?.type === 'SETTINGS_UPDATED') {
+        loadConfig();
       }
     });
-
-    // Register tab ID with background worker
-    chrome.runtime.sendMessage({ type: 'REGISTER_HANDSHAKE_TAB' }).catch(() => {});
-
-    // Handle visibility change (re-sync when tab becomes active)
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && config.enabled) {
-        resetAutoReloadTimer();
-        scanAndClaim();
-      }
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && Object.keys(changes).some(key => key in DEFAULTS)) loadConfig();
     });
   }
 
-  async function updateConfigFromStorage() {
-    const data = await chrome.storage.local.get([
-      'enabled', 'pollInterval', 'clickDelay', 'soundEnabled', 
-      'notifyEnabled', 'autoCloseTabs', 'closeTabDelay',
-      'autoSwitchTab', 'availableTabKeywords', 'taskCardKeywords',
-      'autoReload', 'reloadInterval', 
-      'buttonKeywords', 'customSelectors'
-    ]);
-
-    config.enabled = !!data.enabled;
-    config.pollInterval = data.pollInterval || 300;
-    config.clickDelay = data.clickDelay || 0;
-    config.soundEnabled = data.soundEnabled !== false;
-    config.notifyEnabled = data.notifyEnabled !== false;
-    config.autoCloseTabs = data.autoCloseTabs !== false;
-    config.closeTabDelay = data.closeTabDelay !== undefined ? data.closeTabDelay : 200;
-    config.autoSwitchTab = data.autoSwitchTab !== false;
-    config.autoReload = !!data.autoReload;
-    config.reloadInterval = data.reloadInterval || 30;
-
-    // Parse button keywords
-    const rawKeywords = data.buttonKeywords || 'Claim, Claim Task, Start, Accept, Reserve, Take Task';
-    config.buttonKeywords = rawKeywords
-      .split(',')
-      .map(k => k.trim().toLowerCase())
-      .filter(k => k.length > 0);
-
-    // Parse tab keywords
-    const rawTabKeywords = data.availableTabKeywords || 'Available tasks, Available, Open tasks, All tasks';
-    config.availableTabKeywords = rawTabKeywords
-      .split(',')
-      .map(k => k.trim().toLowerCase())
-      .filter(k => k.length > 0);
-
-    // Parse task card keywords & selectors
-    const defaultCards = '.task-card, .task-item, .task-row, [class*="task-card"], [class*="task-item"], [class*="project-card"], View, Open, Task';
-    const rawCardKeywords = data.taskCardKeywords || defaultCards;
-    
-    config.taskCardSelectors = [];
-    config.taskCardKeywords = [];
-
-    rawCardKeywords.split(',').forEach(item => {
-      const trimmed = item.trim();
-      if (!trimmed) return;
-      if (trimmed.startsWith('.') || trimmed.startsWith('#') || trimmed.startsWith('[')) {
-        config.taskCardSelectors.push(trimmed);
-      } else {
-        config.taskCardKeywords.push(trimmed.toLowerCase());
-      }
-    });
-
-    // Parse custom selectors
-    const rawSelectors = data.customSelectors || '';
-    config.customSelectors = rawSelectors
-      .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-
-    // Inject in-page window.open hook for direct JS window popups
-    injectWindowOpenHook(config.enabled && config.autoCloseTabs, config.closeTabDelay);
-
-    if (config.enabled) {
-      startEngine();
-    } else {
+  async function loadConfig() {
+    try {
+      const stored = await chrome.storage.local.get(DEFAULTS);
+      config = { ...DEFAULTS, ...stored };
+      config.enabled = Boolean(config.enabled);
+      config.pollInterval = clampNumber(config.pollInterval, 100, 2000, 500);
+      config.clickDelay = clampNumber(config.clickDelay, 0, 3000, 250);
+      config.reloadInterval = clampNumber(config.reloadInterval, 10, 180, 60);
       stopEngine();
+      if (config.enabled) startEngine();
+    } catch (error) {
+      console.error('[Auto-Claimer] Unable to load settings:', error);
     }
   }
 
-  function injectWindowOpenHook(autoClose, delayMs) {
-    const code = `
-      (function() {
-        window.__autoCloseEnabled = ${autoClose};
-        window.__autoCloseDelay = ${delayMs};
-        if (window.__openHookInjected) return;
-        window.__openHookInjected = true;
-        const origOpen = window.open;
-        window.open = function(...args) {
-          const win = origOpen.apply(this, args);
-          if (window.__autoCloseEnabled && win) {
-            setTimeout(() => {
-              try { win.close(); } catch(e) {}
-            }, window.__autoCloseDelay || 200);
-          }
-          return win;
-        };
-      })();
-    `;
-    const script = document.createElement('script');
-    script.textContent = code;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
+  function clampNumber(value, min, max, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
   }
 
   function startEngine() {
-    if (isScanning) stopEngine();
-    isScanning = true;
-
-    // 1. Setup MutationObserver for zero-delay DOM detection
-    setupObserver();
-
-    // 2. Setup interval scanner for periodic checks
-    pollTimer = setInterval(() => {
-      scanAndClaim();
-    }, config.pollInterval);
-
-    // 3. Setup Auto-Reload Timer if configured
-    resetAutoReloadTimer();
-
-    // Initial immediate scan
+    if (scanning) return;
+    scanning = true;
+    observer = new MutationObserver(() => scanAndClaim());
+    const root = document.documentElement;
+    if (root) observer.observe(root, { childList: true, subtree: true });
+    pollTimer = setInterval(scanAndClaim, config.pollInterval);
+    resetReloadTimer();
     scanAndClaim();
-    logActivity('Engine active. Monitoring for available tasks...', 'system');
+    logActivity('Detection enabled. Review matches before relying on automatic actions.', 'system');
   }
 
   function stopEngine() {
-    isScanning = false;
-
-    if (observer) {
-      observer.disconnect();
-      observer = null;
-    }
-
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-
-    if (autoReloadTimer) {
-      clearTimeout(autoReloadTimer);
-      autoReloadTimer = null;
-    }
+    scanning = false;
+    observer?.disconnect();
+    observer = null;
+    if (pollTimer) clearInterval(pollTimer);
+    if (reloadTimer) clearTimeout(reloadTimer);
+    pollTimer = null;
+    reloadTimer = null;
   }
 
-  function setupObserver() {
-    if (observer) observer.disconnect();
-
-    observer = new MutationObserver((mutations) => {
-      if (!config.enabled) return;
-      
-      // Quick check if any added nodes might contain interactive elements
-      let shouldScan = false;
-      for (const mutation of mutations) {
-        if (mutation.addedNodes.length > 0) {
-          shouldScan = true;
-          break;
-        }
-      }
-
-      if (shouldScan) {
-        scanAndClaim();
-      }
-    });
-
-    observer.observe(document.body || document.documentElement, {
-      childList: true,
-      subtree: true
-    });
-  }
-
-  function resetAutoReloadTimer() {
-    if (autoReloadTimer) clearTimeout(autoReloadTimer);
-    if (!config.enabled || !config.autoReload) return;
-
-    autoReloadTimer = setTimeout(() => {
-      logActivity(`No tasks found for ${config.reloadInterval}s. Reloading page...`, 'warn');
-      window.location.reload();
-    }, config.reloadInterval * 1000);
-  }
-
-  function switchToAvailableTab() {
-    if (!config.enabled || !config.autoSwitchTab) return false;
-
-    const tabSelectors = 'button, a, [role="tab"], div[class*="tab"], li[class*="tab"], span[class*="tab"], [class*="nav"]';
-    const elements = document.querySelectorAll(tabSelectors);
-
-    for (const el of elements) {
-      if (!isElementVisibleAndEnabled(el, true)) continue;
-
-      const text = (el.innerText || el.textContent || '').toLowerCase().trim();
-      const isMatch = config.availableTabKeywords.some(kw => text.includes(kw));
-
-      if (isMatch) {
-        // Check if tab is already active/selected
-        const isActive = el.classList.contains('active') || 
-                         el.classList.contains('selected') || 
-                         el.classList.contains('current') ||
-                         el.getAttribute('aria-selected') === 'true' ||
-                         el.getAttribute('data-state') === 'active' ||
-                         el.getAttribute('data-selected') === 'true';
-
-        if (!isActive && el.dataset.autoSwitched !== 'true') {
-          el.dataset.autoSwitched = 'true';
-          logActivity(`Switching page view to "${text}" tab...`, 'system');
-          executeHumanClick(el);
-          return true;
-        } else if (isActive) {
-          return false;
-        }
-      }
-    }
-
-    return false;
+  function resetReloadTimer() {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = null;
+    // Automatic reload is deliberately disabled: refreshing can interrupt a task.
   }
 
   async function scanAndClaim() {
-    if (!config.enabled) return;
-
-    // Step 0: Ensure we are on "Available tasks" tab
-    const switched = switchToAvailableTab();
-    if (switched) return;
-
-    // Increment scan counter in storage periodically
-    incrementScanCount();
-
-    // Step 1: Check if "Claim Task" button is ALREADY visible in DOM
-    const claimableButtons = findClaimButtons();
-
-    if (claimableButtons.length > 0) {
-      resetAutoReloadTimer(); // Reset idle reload timer since elements were detected
-
-      for (const button of claimableButtons) {
-        if (button.dataset.autoClaimed === 'true') continue;
-
-        // Mark immediately to avoid double-clicking in fast loops
-        button.dataset.autoClaimed = 'true';
-
-        const btnText = (button.innerText || button.textContent || 'Task Button').trim();
-        logActivity(`STEP 2/2: CLAIM BUTTON FOUND! Executing claim click on "${btnText}"`, 'success');
-
-        // Signal pre-claim to background worker before click opens window
-        chrome.runtime.sendMessage({ type: 'PRE_CLAIM' });
-
-        if (config.clickDelay > 0) {
-          await delay(config.clickDelay);
-        }
-
-        executeHumanClick(button);
-
-        // Send claim success event
-        chrome.runtime.sendMessage({
-          type: 'TASK_CLAIMED',
-          buttonText: btnText,
-          url: window.location.href,
-          soundEnabled: config.soundEnabled,
-          notifyEnabled: config.notifyEnabled
-        });
+    if (!config.enabled || !scanning || document.hidden) return;
+    const buttons = findClaimButtons();
+    if (!buttons.length) {
+      if (Date.now() - lastScanLog > 30000) {
+        lastScanLog = Date.now();
+        logActivity('Scanning page; no clear claim button found.', 'system');
       }
       return;
     }
 
-    // Step 2: If no Claim button is currently visible, click an Available Task Card to open details & reveal Claim button!
-    const taskCards = findTaskCards();
-    if (taskCards.length > 0) {
-      for (const card of taskCards) {
-        if (card.dataset.autoCardClicked === 'true') continue;
+    for (const button of buttons) {
+      if (!config.enabled || clicked.has(button) || pending.has(button)) continue;
+      if (!isVisible(button) || !isClearlyClaimAction(button)) continue;
 
-        card.dataset.autoCardClicked = 'true';
-        const cardText = (card.innerText || card.textContent || 'Task Item').trim().substring(0, 35);
-        logActivity(`STEP 1/2: TASK CARD DETECTED! Opening details for "${cardText}..."`, 'system');
+      // Never auto-click ambiguous labels such as "Start", "Open", or "View".
+      pending.add(button);
+      const label = getLabel(button);
+      logActivity('Candidate found: "' + label + '". Attempting one normal click.', 'system');
 
-        executeHumanClick(card);
-        resetAutoReloadTimer();
-        break; // Open one task card at a time to reveal its Claim button
+      if (config.clickDelay > 0) await new Promise(resolve => setTimeout(resolve, config.clickDelay));
+      if (!config.enabled || !button.isConnected || !isVisible(button) || !isClearlyClaimAction(button)) {
+        pending.delete(button);
+        continue;
       }
+
+      clicked.add(button);
+      try {
+        button.click();
+        // A click is not proof of success. Do not increment the claimed counter here.
+        logActivity('Click sent to "' + label + '". Waiting for the page to confirm the result.', 'system');
+        await waitForClaimOutcome(button, label);
+      } catch (error) {
+        clicked.delete(button);
+        logActivity('Click failed: ' + String(error?.message || error), 'error');
+      } finally {
+        pending.delete(button);
+      }
+      break; // One action per scan; avoid rapid multiple claims.
     }
   }
 
   function findClaimButtons() {
     const candidates = new Set();
-
-    const availableContainer = document.querySelector('[id*="available"], [class*="available"], [data-tab*="available"], [aria-labelledby*="available"]');
-    const searchRoot = availableContainer || document;
-
-    // Strategy 1: Check Custom Selectors if user defined any
-    if (config.customSelectors.length > 0) {
-      for (const selector of config.customSelectors) {
-        try {
-          const elements = searchRoot.querySelectorAll(selector);
-          elements.forEach(el => {
-            if (isElementVisibleAndEnabled(el)) candidates.add(el);
-          });
-        } catch (e) {
-          // Ignore invalid selector syntax
-        }
-      }
-    }
-
-    // Strategy 2: Find interactive elements matching keywords
-    const interactiveSelectors = 'button, a, input[type="button"], input[type="submit"], [role="button"], div[class*="btn"], span[class*="btn"], div[class*="claim"], button[class*="claim"]';
-    const elements = searchRoot.querySelectorAll(interactiveSelectors);
-
-    elements.forEach(el => {
-      if (isElementVisibleAndEnabled(el)) {
-        const text = (el.innerText || el.textContent || el.value || '').toLowerCase().trim();
-        
-        // Match against keywords
-        const isMatch = config.buttonKeywords.some(keyword => {
-          if (!keyword) return false;
-          return text.includes(keyword);
-        });
-
-        if (isMatch) {
-          candidates.add(el);
-        }
-      }
-    });
-
-    return Array.from(candidates);
-  }
-
-  function findTaskCards() {
-    const candidates = new Set();
-
-    const availableContainer = document.querySelector('[id*="available"], [class*="available"], [data-tab*="available"], [aria-labelledby*="available"]');
-    const searchRoot = availableContainer || document;
-
-    // 1. Match explicitly defined card CSS selectors
-    if (config.taskCardSelectors.length > 0) {
-      for (const selector of config.taskCardSelectors) {
-        try {
-          const els = searchRoot.querySelectorAll(selector);
-          els.forEach(el => {
-            if (isElementVisibleAndEnabled(el)) candidates.add(el);
-          });
-        } catch (e) {}
-      }
-    }
-
-    if (candidates.size > 0) return Array.from(candidates);
-
-    // 2. Fallback: Search elements with task-card like class names or keywords
-    const cardSelectors = 'div[class*="task-card"], div[class*="task-item"], div[class*="task-row"], div[class*="project-card"], tr[class*="task"], [data-testid*="task"]';
-    const elements = searchRoot.querySelectorAll(cardSelectors);
-
-    elements.forEach(el => {
-      if (isElementVisibleAndEnabled(el)) {
-        candidates.add(el);
-      }
-    });
-
-    return Array.from(candidates);
-  }
-
-  function isElementVisibleAndEnabled(el, isTabCheck = false) {
-    if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
-
-    // Strict Guard: Exclude elements inside "My Tasks" or "Claimed" sections (unless checking tab navigation)
-    if (!isTabCheck) {
-      const myTasksContainer = el.closest('[id*="my-task"], [class*="my-task"], [id*="my_task"], [class*="my_task"], [id*="viewMyTasks"], [data-tab*="my-task"], [aria-labelledby*="my-task"], [id*="claimed-task"], [class*="claimed-task"]');
-      if (myTasksContainer) {
-        return false;
-      }
-    }
-
-    // Check style visibility
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-
-    // Check parent visibility & aria-hidden
-    let parent = el.parentElement;
-    while (parent && parent !== document.body) {
-      if (parent.getAttribute('aria-hidden') === 'true' || parent.hidden) return false;
-      const pStyle = window.getComputedStyle(parent);
-      if (pStyle.display === 'none' || pStyle.visibility === 'hidden') return false;
-      parent = parent.parentElement;
-    }
-
-    // Check size
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return false;
-
-    return true;
-  }
-
-  function executeHumanClick(element) {
-    // Scroll into view if needed
-    element.scrollIntoView({ block: 'center', behavior: 'instant' });
-
-    // Focus element
-    element.focus();
-
-    // Check if element is an anchor link with target="_blank"
-    const anchor = element.tagName === 'A' ? element : element.closest('a');
-    if (anchor && anchor.getAttribute('target') === '_blank' && anchor.href && config.autoCloseTabs) {
-      try {
-        const win = window.open(anchor.href, '_blank');
-        if (win) {
-          setTimeout(() => {
-            try { win.close(); } catch (e) {}
-          }, config.closeTabDelay || 200);
-        }
-        return;
-      } catch (e) {}
-    }
-
-    // Dispatch full sequence of pointer/mouse events to bypass synthetic click blocks
-    const eventOptions = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      buttons: 1
-    };
-
-    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(eventType => {
-      const event = new MouseEvent(eventType, eventOptions);
-      element.dispatchEvent(event);
-    });
-
-    // Call native click method as fallback
-    if (typeof element.click === 'function') {
-      element.click();
-    }
-  }
-
-  function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  function incrementScanCount() {
-    // Throttled scan counter update
-    const now = Date.now();
-    if (now - lastActivityTime > 5000) {
-      lastActivityTime = now;
-      chrome.storage.local.get('scansCount', (d) => {
-        const current = d.scansCount || 0;
-        chrome.storage.local.set({ scansCount: current + 10 });
+    const selectors = [
+      'button', 'a[role="button"]', '[role="button"]',
+      'input[type="button"]', 'input[type="submit"]'
+    ];
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach(element => {
+        if (isVisible(element) && isClearlyClaimAction(element)) candidates.add(element);
       });
     }
+
+    // Custom selectors are opt-in, but still must pass the same visible/label safety checks.
+    for (const selector of String(config.customSelectors || '').split(',').map(s => s.trim()).filter(Boolean)) {
+      try {
+        document.querySelectorAll(selector).forEach(element => {
+          if (isVisible(element) && isClearlyClaimAction(element)) candidates.add(element);
+        });
+      } catch (error) {
+        console.warn('[Auto-Claimer] Ignoring invalid CSS selector:', selector, error);
+      }
+    }
+    return [...candidates];
   }
 
-  function logActivity(msg, type = 'system') {
-    const time = new Date().toLocaleTimeString();
-    console.log(`[Handshake Auto-Claimer ${time}] (${type}): ${msg}`);
-    
-    chrome.storage.local.get('logs', (data) => {
-      const logs = data.logs || [];
-      logs.push({ time, msg, type });
-      if (logs.length > 50) logs.shift();
-      chrome.storage.local.set({ logs });
+  function getLabel(element) {
+    return String(element.innerText || element.textContent || element.value || element.getAttribute('aria-label') || '')
+      .replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+
+  function isClearlyClaimAction(element) {
+    const label = getLabel(element).toLowerCase();
+    if (!label || label.length > 100) return false;
+    const blocked = /^(view|open|details|learn more|start|start now|continue|next|submit|cancel|close|back|refresh|search|filter)$/i;
+    if (blocked.test(label)) return false;
+    const keywords = String(config.buttonKeywords || DEFAULTS.buttonKeywords)
+      .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+    return keywords.some(keyword => {
+      if (!keyword) return false;
+      // Match a distinct claim/accept/reserve action, not arbitrary text containing "start".
+      if (/^(start|open|view|task)$/.test(keyword)) return false;
+      return label === keyword || label.includes(keyword);
     });
+  }
+
+  function isVisible(element) {
+    if (!(element instanceof Element) || !element.isConnected) return false;
+    if (element.disabled || element.getAttribute('aria-disabled') === 'true') return false;
+    if (element.closest('[aria-hidden="true"], [hidden], [inert]')) return false;
+    const style = getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  async function waitForClaimOutcome(button, label) {
+    const start = Date.now();
+    const initialUrl = location.href;
+    const initialLabel = label.toLowerCase();
+    while (Date.now() - start < 4000) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const bodyText = (document.body?.innerText || '').toLowerCase();
+      const successText = /task claimed|successfully claimed|claim successful|task accepted|you have claimed|already claimed/.test(bodyText);
+      const failureText = /unable to claim|failed to claim|claim failed|no longer available|already taken|something went wrong/.test(bodyText);
+      const changedToNonClaim = !button.isConnected || !isVisible(button) || !isClearlyClaimAction(button);
+      if (failureText) {
+        logActivity('The page appears to report a claim failure. Check the task status manually.', 'warn');
+        return;
+      }
+      if (successText || (location.href !== initialUrl && /task|project|work/i.test(location.href))) {
+        reportConfirmedClaim(label);
+        return;
+      }
+      if (changedToNonClaim && Date.now() - start > 1000) {
+        // A disappearing button alone is not sufficient evidence of success.
+        logActivity('Claim button changed or disappeared; success is unconfirmed. Verify on the page.', 'warn');
+        return;
+      }
+    }
+    logActivity('No reliable success confirmation detected for "' + initialLabel + '". Check the page manually.', 'warn');
+  }
+
+  async function reportConfirmedClaim(label) {
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'TASK_CLAIMED',
+        buttonText: label,
+        soundEnabled: config.soundEnabled,
+        notifyEnabled: config.notifyEnabled
+      });
+      logActivity('Page success indicator detected for "' + label + '".', 'success');
+    } catch (error) {
+      console.warn('[Auto-Claimer] Could not notify background worker:', error);
+    }
+  }
+
+  function logActivity(message, type = 'system') {
+    const time = new Date().toLocaleTimeString();
+    console.log('[Auto-Claimer ' + time + '] ' + message);
+    chrome.storage.local.get({ logs: [] }).then(({ logs }) => {
+      const next = [...logs, { time, msg: message, type }].slice(-50);
+      return chrome.storage.local.set({ logs: next });
+    }).catch(error => console.warn('[Auto-Claimer] Log write failed:', error));
   }
 })();
