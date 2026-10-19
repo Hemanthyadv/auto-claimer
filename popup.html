@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Handshake AI Auto-Claimer</title>
+  <link rel="stylesheet" href="popup.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="icon">⚡</span>
+        <div class="title-group">
+          <h1>Handshake Claimer</h1>
+          <span class="version">v1.0 Pro</span>
+        </div>
+      </div>
+      <div class="status-badge" id="statusBadge">
+        <span class="dot"></span>
+        <span id="statusText">STOPPED</span>
+      </div>
+    </header>
+
+    <!-- Master Switch -->
+    <div class="master-switch-card">
+      <div class="switch-info">
+        <span class="switch-title">Auto-Claimer Engine</span>
+        <span class="switch-desc" id="switchDesc">Activate real-time task detection</span>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="enableToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Live Stats Grid -->
+    <div class="stats-grid">
+      <div class="stat-card accent">
+        <span class="stat-label">Tasks Claimed</span>
+        <span class="stat-value" id="statClaimed">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Scans Done</span>
+        <span class="stat-value" id="statScans">0</span>
+      </div>
+    </div>
+
+    <!-- Tab Control -->
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="general">General</button>
+      <button class="tab-btn" data-tab="selectors">Selectors</button>
+      <button class="tab-btn" data-tab="logs">Activity Log</button>
+    </div>
+
+    <!-- General Settings -->
+    <div class="tab-content active" id="tab-general">
+      <div class="setting-group">
+        <label for="pollInterval">Check Speed: <span id="pollVal" class="val-highlight">300 ms</span></label>
+        <input type="range" id="pollInterval" min="100" max="2000" step="50" value="300">
+        <span class="setting-hint">Faster speeds (100-300ms) give highest chance of winning task races.</span>
+      </div>
+
+      <div class="setting-group">
+        <label for="clickDelay">Click Delay: <span id="delayVal" class="val-highlight">0 ms</span></label>
+        <input type="range" id="clickDelay" min="0" max="1500" step="50" value="0">
+        <span class="setting-hint">Add artificial delay (0-1500ms) if anti-bot checks occur.</span>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label-block">
+          <span>Audio Alert Sound</span>
+          <span class="setting-hint">Play chime when task is claimed</span>
+        </div>
+        <label class="toggle-switch small">
+          <input type="checkbox" id="soundToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label-block">
+          <span>Browser Notifications</span>
+          <span class="setting-hint">Show desktop popups</span>
+        </div>
+        <label class="toggle-switch small">
+          <input type="checkbox" id="notifyToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label-block">
+          <span>Auto-Close Task Tabs</span>
+          <span class="setting-hint">Close new tabs opened after claiming so you can claim next</span>
+        </div>
+        <label class="toggle-switch small">
+          <input type="checkbox" id="autoCloseTabsToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-group" id="closeTabDelayGroup">
+        <label for="closeTabDelay">Close Tab Delay: <span id="closeTabVal" class="val-highlight">200 ms</span></label>
+        <input type="range" id="closeTabDelay" min="0" max="3000" step="100" value="200">
+        <span class="setting-hint">Wait X ms before closing tab to ensure Handshake registers claim.</span>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label-block">
+          <span>Auto-Switch to "Available Tasks"</span>
+          <span class="setting-hint">Automatically click Available Tasks tab on load/reload</span>
+        </div>
+        <label class="toggle-switch small">
+          <input type="checkbox" id="autoSwitchTabToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label-block">
+          <span>Auto-Reload Page</span>
+          <span class="setting-hint">Refresh page if idle for X seconds</span>
+        </div>
+        <label class="toggle-switch small">
+          <input type="checkbox" id="autoReloadToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-group hidden" id="reloadSecGroup">
+        <label for="reloadInterval">Reload Timer: <span id="reloadVal" class="val-highlight">30 sec</span></label>
+        <input type="range" id="reloadInterval" min="10" max="180" step="5" value="30">
+      </div>
+    </div>
+
+    <!-- Selectors Settings -->
+    <div class="tab-content" id="tab-selectors">
+      <div class="setting-group">
+        <label for="buttonKeywords">Button Keywords (comma separated)</label>
+        <input type="text" id="buttonKeywords" class="text-input" placeholder="Claim, Start, Accept, Reserve, Take Task">
+        <span class="setting-hint">Buttons containing these words will be automatically clicked.</span>
+      </div>
+
+      <div class="setting-group">
+        <label for="customSelectors">Custom CSS Selectors (optional)</label>
+        <textarea id="customSelectors" class="text-area" rows="3" placeholder=".claim-btn, button[data-action='claim'], #start-task-btn"></textarea>
+        <span class="setting-hint">Specific CSS selectors to target claim buttons.</span>
+      </div>
+
+      <div class="setting-group">
+        <label for="availableTabKeywords">Available Tasks Tab Keywords</label>
+        <input type="text" id="availableTabKeywords" class="text-input" placeholder="Available tasks, Available, Open tasks, All tasks">
+        <span class="setting-hint">In-page tab text to auto-switch to when page loads.</span>
+      </div>
+
+      <div class="setting-group">
+        <label for="taskCardKeywords">Task Card/Row Keywords & Selectors (Step 1 Click)</label>
+        <input type="text" id="taskCardKeywords" class="text-input" placeholder=".task-card, .task-item, [class*='task'], View, Open, Task">
+        <span class="setting-hint">Cards/rows to click FIRST to reveal the Claim button.</span>
+      </div>
+
+      <button id="resetSelectorsBtn" class="btn secondary full-width">Reset to Handshake Defaults</button>
+    </div>
+
+    <!-- Activity Log Tab -->
+    <div class="tab-content" id="tab-logs">
+      <div class="logs-container" id="logsContainer">
+        <div class="log-entry system">Auto-Claimer Ready. Enable to start monitoring.</div>
+      </div>
+      <button id="clearLogsBtn" class="btn secondary full-width">Clear Logs</button>
+    </div>
+
+    <!-- Footer Actions -->
+    <footer class="footer">
+      <button id="testAudioBtn" class="btn icon-btn" title="Test Audio Alert">🔔 Test Sound</button>
+      <button id="resetStatsBtn" class="btn secondary icon-btn" title="Reset Counter">🔄 Reset Stats</button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

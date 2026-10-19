@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Handshake AI Task Simulator (Test Bench)</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 30px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #38bdf8;
+      border-bottom: 2px solid #334155;
+      padding-bottom: 10px;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 15px;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    .claim-btn {
+      background: #10b981;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .claim-btn:hover {
+      background: #059669;
+    }
+    .claimed {
+      background: #475569 !important;
+      cursor: not-allowed;
+    }
+
+    /* Handshake Page Tabs UI */
+    .handshake-tabs-nav {
+      display: flex;
+      gap: 8px;
+      border-bottom: 2px solid #334155;
+      margin-bottom: 15px;
+    }
+    .handshake-tab-btn {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      padding: 10px 20px;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+    }
+    .handshake-tab-btn.active {
+      color: #38bdf8;
+      border-bottom-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.1);
+      border-radius: 6px 6px 0 0;
+    }
+
+    #taskFeed {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 15px;
+    }
+
+    /* 2-Step Handshake Task Card Styling */
+    .task-card {
+      background: #090d16;
+      border: 1px dashed #38bdf8;
+      padding: 16px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .task-card:hover {
+      background: #0f172a;
+      border-style: solid;
+    }
+
+    .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .task-details-panel {
+      background: #1e293b;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+      animation: expand 0.2s ease;
+    }
+
+    @keyframes expand {
+      from { opacity: 0; transform: scaleY(0.9); }
+      to { opacity: 1; transform: scaleY(1); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .info {
+      display: flex;
+      flex-direction: column;
+    }
+    .task-title {
+      font-weight: bold;
+      color: #38bdf8;
+    }
+    .pay {
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>⚡ Handshake AI Task Auto-Claimer Test Bench</h1>
+  <p>Use this interactive simulator to verify that the Chrome Extension automatically detects tasks, opens task cards, and claims tasks in real time.</p>
+
+  <div class="card">
+    <h3>Simulator Controls</h3>
+    <div class="btn-row">
+      <button id="spawnTaskBtn">➕ Drop 1 Fast Task</button>
+      <button id="autoSpawnBtn" style="background:#8b5cf6;">⚡ Start Random Task Drop Stream</button>
+      <button id="clearBtn" style="background:#64748b;">🗑️ Clear Tasks</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Handshake AI Dashboard</h3>
+
+    <!-- In-Page Tab Navigation (Simulating Handshake UI) -->
+    <div class="handshake-tabs-nav">
+      <button class="handshake-tab-btn active" id="tabMyTasks">My tasks</button>
+      <button class="handshake-tab-btn" id="tabAvailableTasks">Available tasks</button>
+    </div>
+
+    <!-- My Tasks View -->
+    <div id="viewMyTasks">
+      <div style="color:#cbd5e1; padding:15px; background:#090d16; border-radius:8px;">
+        📌 <strong>My tasks tab (Default on load)</strong>: No tasks currently in progress.
+      </div>
+    </div>
+
+    <!-- Available Tasks View -->
+    <div id="viewAvailableTasks" class="hidden">
+      <div id="taskFeed">
+        <div style="color:#94a3b8; font-style:italic;" id="emptyMsg">No tasks active in Available Tasks. Click "Drop 1 Fast Task" or "Start Random Task Drop Stream" to test auto-claiming.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tabMyTasks = document.getElementById('tabMyTasks');
+    const tabAvailableTasks = document.getElementById('tabAvailableTasks');
+    const viewMyTasks = document.getElementById('viewMyTasks');
+    const viewAvailableTasks = document.getElementById('viewAvailableTasks');
+
+    tabMyTasks.addEventListener('click', () => {
+      tabMyTasks.classList.add('active');
+      tabAvailableTasks.classList.remove('active');
+      viewMyTasks.classList.remove('hidden');
+      viewAvailableTasks.classList.add('hidden');
+    });
+
+    tabAvailableTasks.addEventListener('click', () => {
+      tabAvailableTasks.classList.add('active');
+      tabMyTasks.classList.remove('active');
+      viewAvailableTasks.classList.remove('hidden');
+      viewMyTasks.classList.add('hidden');
+    });
+
+    const taskFeed = document.getElementById('taskFeed');
+    const emptyMsg = document.getElementById('emptyMsg');
+    let taskCount = 0;
+    let streamTimer = null;
+
+    document.getElementById('spawnTaskBtn').addEventListener('click', spawnTask);
+
+    document.getElementById('autoSpawnBtn').addEventListener('click', () => {
+      const btn = document.getElementById('autoSpawnBtn');
+      if (streamTimer) {
+        clearInterval(streamTimer);
+        streamTimer = null;
+        btn.textContent = '⚡ Start Random Task Drop Stream';
+        btn.style.background = '#8b5cf6';
+      } else {
+        streamTimer = setInterval(spawnTask, 3000);
+        btn.textContent = '⏸️ Pause Task Stream';
+        btn.style.background = '#ef4444';
+        spawnTask();
+      }
+    });
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      taskFeed.innerHTML = '<div style="color:#94a3b8; font-style:italic;" id="emptyMsg">No tasks active. Click "Drop 1 Fast Task" or "Start Random Task Drop Stream" to test auto-claiming.</div>';
+    });
+
+    function spawnTask() {
+      const msg = document.getElementById('emptyMsg');
+      if (msg) msg.remove();
+
+      taskCount++;
+      const id = taskCount;
+      const card = document.createElement('div');
+      card.className = 'task-card';
+      card.id = `task-card-${id}`;
+
+      card.innerHTML = `
+        <div class="task-header">
+          <div class="info">
+            <span class="task-title">Handshake AI Task #${id} (${getRandomProject()})</span>
+            <span class="pay">Reward: $${(Math.random() * 15 + 5).toFixed(2)} / task • Click card to view details</span>
+          </div>
+          <span style="font-size:0.8rem; color:#38bdf8;">▶ View Task Details</span>
+        </div>
+        <div class="task-details-panel hidden" id="details-panel-${id}">
+          <span style="font-size:0.85rem; color:#cbd5e1;">Task ready for claiming. Click button to accept:</span>
+          <button class="claim-btn" id="claim-btn-${id}">Claim Task</button>
+        </div>
+      `;
+
+      taskFeed.prepend(card);
+
+      // Step 1: Clicking task card opens the task-details-panel revealing the Claim Task button
+      card.addEventListener('click', (e) => {
+        if (e.target.classList.contains('claim-btn')) return; // Avoid re-triggering if claim button itself was clicked
+        const panel = document.getElementById(`details-panel-${id}`);
+        panel.classList.remove('hidden');
+      });
+
+      // Step 2: Clicking Claim Task button claims the task and opens new tab
+      const claimBtn = card.querySelector('.claim-btn');
+      claimBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        claimBtn.textContent = '✓ CLAIMED!';
+        claimBtn.classList.add('claimed');
+        claimBtn.disabled = true;
+
+        try {
+          window.open('about:blank', '_blank');
+        } catch (err) {}
+      });
+    }
+
+    function getRandomProject() {
+      const projects = ['RLHF Annotation', 'Code Review & Audit', 'Multimodal QA', 'Prompt Engineering', 'Safety Evaluation'];
+      return projects[Math.floor(Math.random() * projects.length)];
+    }
+  </script>
+</body>
+</html>
